@@ -1,8 +1,5 @@
 {
-    "buildCommand": "npm run build --filter=@medminder/web",
-    "outputDirectory": "apps/web/.next",
     "framework": "nextjs",
-    "installCommand": "npm install",
     "rewrites": [
         {
             "source": "/api/:path*",
