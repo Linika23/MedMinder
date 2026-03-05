@@ -1,0 +1,260 @@
+// ============================================================
+// MedMinder Prisma Schema
+// Full database model for MVP
+// ============================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// --- Users ---
+enum BiologicalSex {
+  M
+  F
+  O
+  U
+}
+
+model User {
+  id            String        @id @default(uuid()) @db.Uuid
+  email         String        @unique @db.VarChar(255)
+  passwordHash  String        @map("password_hash")
+  phone         String?       @db.VarChar(20)
+  name          String        @db.VarChar(100)
+  dateOfBirth   DateTime?     @map("date_of_birth") @db.Date
+  biologicalSex BiologicalSex? @map("biological_sex")
+  weightKg      Decimal?      @map("weight_kg") @db.Decimal(5, 2)
+  conditions    String[]      @default([])
+  allergies     String[]      @default([])
+  emailVerified Boolean       @default(false) @map("email_verified")
+  twoFactorEnabled Boolean    @default(false) @map("two_factor_enabled")
+  twoFactorSecret  String?    @map("two_factor_secret")
+
+  // Preferences
+  theme         String        @default("system") @db.VarChar(10)
+  fontSize      String        @default("medium") @db.VarChar(20)
+  language      String        @default("en") @db.VarChar(10)
+
+  // Notification preferences (JSON)
+  notificationPreferences Json? @map("notification_preferences")
+
+  // Physician / pharmacy
+  physicianName  String?  @map("physician_name") @db.VarChar(100)
+  physicianPhone String?  @map("physician_phone") @db.VarChar(20)
+  pharmacyName   String?  @map("pharmacy_name") @db.VarChar(100)
+  pharmacyPhone  String?  @map("pharmacy_phone") @db.VarChar(20)
+
+  createdAt     DateTime      @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt     DateTime      @updatedAt @map("updated_at") @db.Timestamptz()
+
+  // Relations
+  medications         Medication[]
+  doseLogs            DoseLog[]
+  interactionsAsUser  Interaction[]
+  caregiverPatients   CaregiverLink[] @relation("Patient")
+  caregiverCaregivers CaregiverLink[] @relation("Caregiver")
+  refreshTokens       RefreshToken[]
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+// --- Refresh Tokens ---
+model RefreshToken {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  token     String   @unique
+  expiresAt DateTime @map("expires_at") @db.Timestamptz()
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+// --- Medications ---
+enum MedicationType {
+  prescription
+  otc
+  supplement
+  herbal
+}
+
+enum MedicationStatus {
+  active
+  prn
+  discontinued
+}
+
+enum FoodInstruction {
+  with
+  without
+  no_preference
+}
+
+model Medication {
+  id              String           @id @default(uuid()) @db.Uuid
+  userId          String           @map("user_id") @db.Uuid
+  name            String           @db.VarChar(255)
+  dosage          String?          @db.VarChar(100)
+  unit            String?          @db.VarChar(20)
+  frequency       Json
+  medicationType  MedicationType   @map("medication_type")
+  instructions    String?
+  withFood        FoodInstruction  @default(no_preference) @map("with_food")
+  startDate       DateTime?        @map("start_date") @db.Date
+  endDate         DateTime?        @map("end_date") @db.Date
+  quantityOnHand  Int?             @map("quantity_on_hand")
+  refillThreshold Int?             @map("refill_threshold")
+  status          MedicationStatus @default(active)
+  ndcCode         String?          @map("ndc_code") @db.VarChar(20)
+  pillColor       String?          @map("pill_color")
+  pillShape       String?          @map("pill_shape")
+  prescribingDoctor String?        @map("prescribing_doctor")
+  pharmacy        String?
+  reason          String?
+
+  // OCR image reference
+  ocrImageUrl     String?          @map("ocr_image_url")
+  ocrImageExpiry  DateTime?        @map("ocr_image_expiry") @db.Timestamptz()
+
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz()
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz()
+
+  // Relations
+  user          User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  doseLogs      DoseLog[]
+  interactionsA Interaction[] @relation("MedA")
+  interactionsB Interaction[] @relation("MedB")
+
+  @@index([userId, status])
+  @@index([userId])
+  @@map("medications")
+}
+
+// --- Dose Logs ---
+enum DoseStatus {
+  taken_on_time
+  taken_late
+  skipped
+  snoozed
+  pending
+}
+
+model DoseLog {
+  id            String     @id @default(uuid()) @db.Uuid
+  medicationId  String     @map("medication_id") @db.Uuid
+  userId        String     @map("user_id") @db.Uuid
+  scheduledTime DateTime   @map("scheduled_time") @db.Timestamptz()
+  actualTime    DateTime?  @map("actual_time") @db.Timestamptz()
+  status        DoseStatus @default(pending)
+  notes         String?
+
+  createdAt     DateTime   @default(now()) @map("created_at") @db.Timestamptz()
+
+  // Relations
+  medication Medication @relation(fields: [medicationId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, scheduledTime])
+  @@index([medicationId])
+  @@index([userId, status])
+  @@map("dose_logs")
+}
+
+// --- Interactions ---
+enum InteractionSeverity {
+  critical
+  major
+  moderate
+  mild
+  none
+}
+
+model Interaction {
+  id          String              @id @default(uuid()) @db.Uuid
+  userId      String              @map("user_id") @db.Uuid
+  medAId      String              @map("med_a_id") @db.Uuid
+  medBId      String              @map("med_b_id") @db.Uuid
+  severity    InteractionSeverity
+  description String?
+  aiSummary   String?             @map("ai_summary")
+  mechanism   String?
+  symptoms    String[]            @default([])
+  recommendations String[]       @default([])
+  source      String              @db.VarChar(50)
+  cachedAt    DateTime?           @map("cached_at") @db.Timestamptz()
+
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz()
+
+  // Relations
+  user User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  medA Medication @relation("MedA", fields: [medAId], references: [id], onDelete: Cascade)
+  medB Medication @relation("MedB", fields: [medBId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, medAId, medBId])
+  @@index([userId])
+  @@map("interactions")
+}
+
+// --- Caregiver Links ---
+enum CaregiverStatus {
+  pending
+  active
+  revoked
+}
+
+enum CaregiverPermission {
+  read
+  write
+}
+
+model CaregiverLink {
+  id          String              @id @default(uuid()) @db.Uuid
+  patientId   String              @map("patient_id") @db.Uuid
+  caregiverId String?             @map("caregiver_id") @db.Uuid
+  status      CaregiverStatus     @default(pending)
+  permissions CaregiverPermission @default(read)
+
+  // Invite metadata
+  inviteEmail String?             @map("invite_email") @db.VarChar(255)
+  invitePhone String?             @map("invite_phone") @db.VarChar(20)
+  inviteToken String?             @unique @map("invite_token")
+  inviteExpiresAt DateTime?       @map("invite_expires_at") @db.Timestamptz()
+
+  invitedAt   DateTime            @default(now()) @map("invited_at") @db.Timestamptz()
+  acceptedAt  DateTime?           @map("accepted_at") @db.Timestamptz()
+
+  // Relations
+  patient   User  @relation("Patient", fields: [patientId], references: [id], onDelete: Cascade)
+  caregiver User? @relation("Caregiver", fields: [caregiverId], references: [id], onDelete: SetNull)
+
+  @@index([patientId])
+  @@index([caregiverId])
+  @@map("caregiver_links")
+}
+
+// --- Audit Logs (HIPAA) ---
+model AuditLog {
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @map("user_id") @db.Uuid
+  action    String   @db.VarChar(100)
+  resource  String   @db.VarChar(100)
+  resourceId String? @map("resource_id") @db.Uuid
+  details   Json?
+  ipAddress String?  @map("ip_address") @db.VarChar(45)
+
+  createdAt DateTime @default(now()) @map("created_at") @db.Timestamptz()
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([resource, resourceId])
+  @@map("audit_logs")
+}
